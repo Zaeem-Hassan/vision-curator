@@ -1,0 +1,185 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: visioncurator-backend
+  labels:
+    app: visioncurator
+    component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: visioncurator
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: visioncurator
+        component: backend
+    spec:
+      containers:
+        - name: backend
+          image: visioncurator/backend:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: visioncurator-secrets
+                  key: database-url
+            - name: REDIS_URL
+              value: redis://redis-service:6379/0
+            - name: CELERY_BROKER_URL
+              value: redis://redis-service:6379/1
+            - name: DEVICE
+              value: cpu
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+spec:
+  selector:
+    app: visioncurator
+    component: backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: visioncurator-frontend
+  labels:
+    app: visioncurator
+    component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: visioncurator
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: visioncurator
+        component: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: visioncurator/frontend:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              value: http://backend-service:8000/api
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+spec:
+  selector:
+    app: visioncurator
+    component: frontend
+  ports:
+    - port: 3000
+      targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: visioncurator-worker
+  labels:
+    app: visioncurator
+    component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: visioncurator
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: visioncurator
+        component: worker
+    spec:
+      containers:
+        - name: worker
+          image: visioncurator/backend:latest
+          command: ["celery", "-A", "app.services.celery_app", "worker", "--loglevel=info"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: visioncurator-secrets
+                  key: database-url
+            - name: REDIS_URL
+              value: redis://redis-service:6379/0
+            - name: CELERY_BROKER_URL
+              value: redis://redis-service:6379/1
+            - name: DEVICE
+              value: cpu
+          resources:
+            requests:
+              cpu: "1"
+              memory: "2Gi"
+            limits:
+              cpu: "4"
+              memory: "8Gi"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: visioncurator-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: visioncurator.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend-service
+                port:
+                  number: 3000
