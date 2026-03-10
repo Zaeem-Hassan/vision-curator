@@ -15,6 +15,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config import settings
 from app.database import init_db
 
+# ── Pre-import PyTorch at module load time ────────────────────────────────────
+# PyTorch must be fully initialised in the MAIN PROCESS before uvicorn spawns
+# any threads or worker processes. Importing it here (module level, blocking)
+# prevents "partially initialized module / circular import" errors later.
+try:
+    import torch          # noqa: F401
+    import torchvision    # noqa: F401
+    logger.info(f"PyTorch {torch.__version__} loaded")
+except Exception as _torch_err:
+    logger.warning(f"PyTorch import failed at startup: {_torch_err}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,6 +35,11 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
     yield
     logger.info("Shutting down")
+
+
+def _warmup_torch() -> None:
+    """Kept for compatibility — no-op, torch is now imported at module level."""
+    pass
 
 
 app = FastAPI(

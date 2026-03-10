@@ -23,6 +23,11 @@ export default function DatasetsPage() {
     const { data, isLoading } = useQuery({
         queryKey: ["datasets"],
         queryFn: () => api.listDatasets(0, 50),
+        // Auto-poll every 3s while any dataset is processing
+        refetchInterval: (query) => {
+            const ds = query.state.data?.datasets ?? [];
+            return ds.some((d: Dataset) => d.status === "processing") ? 3000 : false;
+        },
     });
 
     const deleteMutation = useMutation({
@@ -152,14 +157,19 @@ function DatasetCard({
             </div>
 
             <div className="flex gap-2 mt-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-                {dataset.status === "pending" && (
+                {(dataset.status === "pending" || dataset.status === "failed") && (
                     <button
                         onClick={onProcess}
                         className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                        style={{ background: "var(--accent)" }}
+                        style={{ background: dataset.status === "failed" ? "var(--danger)" : "var(--accent)" }}
                     >
-                        <Play size={14} /> Process
+                        <Play size={14} /> {dataset.status === "failed" ? "Retry" : "Process"}
                     </button>
+                )}
+                {dataset.status === "processing" && (
+                    <div className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium" style={{ color: "var(--accent)" }}>
+                        <Loader2 size={14} className="animate-spin" /> Processing…
+                    </div>
                 )}
                 {dataset.status === "completed" && (
                     <Link
@@ -249,25 +259,41 @@ function UploadDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
                     />
                 </div>
 
+                {/* Upload mode buttons */}
+                <div className="flex gap-2">
+                    <button
+                        type="button"
+                        onClick={() => document.getElementById("file-input")?.click()}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                        style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+                    >
+                        <Upload size={15} /> Select Images
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => document.getElementById("folder-input")?.click()}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                        style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+                    >
+                        <Database size={15} /> Select Folder
+                    </button>
+                </div>
+
                 {/* Drop Zone */}
                 <div
                     onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                     onDragLeave={() => setIsDragging(false)}
                     onDrop={handleDrop}
-                    className={`rounded-xl p-8 text-center transition-all cursor-pointer ${isDragging ? "scale-[1.02]" : ""}`}
+                    className={`rounded-xl p-6 text-center transition-all ${isDragging ? "scale-[1.02]" : ""}`}
                     style={{
                         border: `2px dashed ${isDragging ? "var(--accent)" : "var(--border)"}`,
                         background: isDragging ? "var(--accent-glow)" : "var(--bg-primary)",
                     }}
-                    onClick={() => document.getElementById("file-input")?.click()}
                 >
-                    <Upload size={32} className="mx-auto mb-2" style={{ color: "var(--text-muted)" }} />
-                    <p className="text-sm font-medium">
-                        Drop images here or <span style={{ color: "var(--accent)" }}>browse</span>
-                    </p>
-                    <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                        Supports JPG, PNG, WebP
-                    </p>
+                    <Upload size={24} className="mx-auto mb-1" style={{ color: "var(--text-muted)" }} />
+                    <p className="text-sm" style={{ color: "var(--text-muted)" }}>or drag &amp; drop images here</p>
+
+                    {/* Hidden inputs */}
                     <input
                         id="file-input"
                         type="file"
@@ -275,16 +301,40 @@ function UploadDialog({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
                         accept="image/*"
                         className="hidden"
                         onChange={(e) => {
-                            const selected = Array.from(e.target.files || []);
+                            const selected = Array.from(e.target.files || []).filter(f => f.type.startsWith("image/"));
                             setFiles((prev) => [...prev, ...selected]);
+                            e.target.value = "";
+                        }}
+                    />
+                    <input
+                        id="folder-input"
+                        type="file"
+                        // @ts-expect-error — webkitdirectory is non-standard but supported by all modern browsers
+                        webkitdirectory=""
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                            const selected = Array.from(e.target.files || []).filter(f => f.type.startsWith("image/"));
+                            setFiles((prev) => [...prev, ...selected]);
+                            e.target.value = "";
                         }}
                     />
                 </div>
 
                 {files.length > 0 && (
-                    <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                        {files.length} images selected ({(files.reduce((a, f) => a + f.size, 0) / 1024 / 1024).toFixed(1)} MB)
-                    </p>
+                    <div className="flex items-center justify-between text-sm">
+                        <span style={{ color: "var(--text-secondary)" }}>
+                            {files.length} images selected ({(files.reduce((a, f) => a + f.size, 0) / 1024 / 1024).toFixed(1)} MB)
+                        </span>
+                        <button
+                            type="button"
+                            onClick={() => setFiles([])}
+                            className="text-xs px-2 py-1 rounded-lg hover:bg-red-500/20"
+                            style={{ color: "var(--danger)" }}
+                        >
+                            Clear
+                        </button>
+                    </div>
                 )}
 
                 <button

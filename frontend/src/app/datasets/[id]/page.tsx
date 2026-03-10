@@ -13,6 +13,8 @@ import {
     Image as ImageIcon,
     Orbit,
     Loader2,
+    Download,
+    X,
 } from "lucide-react";
 import { api, type ImageRecord } from "@/lib/api";
 import { useAppStore } from "@/lib/store";
@@ -21,6 +23,8 @@ export default function DatasetDetailPage() {
     const params = useParams();
     const datasetId = params.id as string;
     const [activeTab, setActiveTab] = useState<"images" | "clusters" | "duplicates" | "outliers">("images");
+    const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+    const [exportSize, setExportSize] = useState<number>(100);
     const queryClient = useQueryClient();
 
     const { data: dataset, isLoading } = useQuery({
@@ -95,13 +99,22 @@ export default function DatasetDetailPage() {
                         </button>
                     )}
                     {dataset.status === "completed" && (
-                        <Link
-                            href={`/galaxy?dataset=${datasetId}`}
-                            className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-medium"
-                            style={{ background: "var(--gradient-2)" }}
-                        >
-                            <Orbit size={14} /> View Galaxy
-                        </Link>
+                        <>
+                            <button
+                                onClick={() => setIsExportModalOpen(true)}
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors"
+                                style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+                            >
+                                <Download size={14} /> Export
+                            </button>
+                            <Link
+                                href={`/galaxy?dataset=${datasetId}`}
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-medium"
+                                style={{ background: "var(--gradient-2)" }}
+                            >
+                                <Orbit size={14} /> View Galaxy
+                            </Link>
+                        </>
                     )}
                 </div>
             </div>
@@ -189,6 +202,62 @@ export default function DatasetDetailPage() {
                     />
                 )}
             </div>
+
+            {/* Export Modal */}
+            {isExportModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="w-full max-w-md p-6 rounded-2xl relative" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
+                        <button
+                            onClick={() => setIsExportModalOpen(false)}
+                            className="absolute top-4 right-4 p-2 rounded-full hover:bg-white/10 transition-colors"
+                        >
+                            <X size={16} />
+                        </button>
+                        
+                        <h2 className="text-xl font-bold mb-1">Smart Export</h2>
+                        <p className="text-sm mb-6" style={{ color: "var(--text-muted)" }}>
+                            Downloads a perfectly balanced dataset for labeling. Includes all outliers (high priority edge-cases) and divides the remaining quota equally among all clusters.
+                        </p>
+
+                        <div className="mb-6">
+                            <label className="block text-sm font-medium mb-2" style={{ color: "var(--text-primary)" }}>
+                                Target Dataset Size (Images)
+                            </label>
+                            <input
+                                type="number"
+                                min="1"
+                                max={dataset.image_count}
+                                value={exportSize}
+                                onChange={(e) => setExportSize(parseInt(e.target.value) || 100)}
+                                className="w-full px-4 py-3 rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                                style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+                            />
+                            <p className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>Max available: {dataset.image_count}</p>
+                        </div>
+
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setIsExportModalOpen(false)}
+                                className="px-4 py-2 rounded-xl text-sm font-medium"
+                                style={{ background: "var(--bg-secondary)" }}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={() => {
+                                    const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
+                                    window.open(`${baseUrl}/datasets/${datasetId}/export?max_images=${exportSize}`, '_blank');
+                                    setIsExportModalOpen(false);
+                                }}
+                                className="flex items-center gap-2 px-5 py-2 rounded-xl text-white text-sm font-medium"
+                                style={{ background: "var(--accent)" }}
+                            >
+                                <Download size={16} /> Download ZIP
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -215,7 +284,16 @@ function ImageGrid({ images, datasetId, onImageClick }: { images: ImageRecord[];
 
 function ImageThumb({ image, datasetId, onClick }: { image: ImageRecord; datasetId: string; onClick: () => void }) {
     const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-    const url = `${baseUrl}/uploads/${datasetId}/${image.filename}`;
+
+    // filepath is stored as a Windows path like:
+    //   data\uploads\<datasetId>\cat\cat_0001.png
+    // We need: http://localhost:8000/uploads/<datasetId>/cat/cat_0001.png
+    const relativePath = (image.filepath || "")
+        .replace(/\\/g, "/")          // normalise Windows backslashes
+        .replace(/^.*?uploads\//, ""); // strip everything up to and including "uploads/"
+    const url = relativePath
+        ? `${baseUrl}/uploads/${relativePath}`
+        : `${baseUrl}/uploads/${datasetId}/${image.filename}`; // fallback
     return (
         <div
             onClick={onClick}

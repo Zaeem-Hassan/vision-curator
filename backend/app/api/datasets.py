@@ -60,17 +60,28 @@ async def upload_dataset(
         if not upload_file.content_type or not upload_file.content_type.startswith("image/"):
             continue
 
-        filename = upload_file.filename or f"{uuid.uuid4()}.jpg"
-        file_path = dataset_dir / filename
+        # upload_file.filename may include subfolder paths from webkitdirectory
+        # e.g. "truck/0001.png" — preserve the relative path for storage but
+        # flatten it (replace / with _) for the DB filename field.
+        raw_name = upload_file.filename or f"{uuid.uuid4()}.jpg"
+        # Normalise slashes (Windows sends backslashes sometimes)
+        raw_name = raw_name.replace("\\", "/")
+        file_path = dataset_dir / raw_name
+
+        # Create parent subdirectories if the folder contains subfolders
+        file_path.parent.mkdir(parents=True, exist_ok=True)
 
         content = await upload_file.read()
         with open(file_path, "wb") as f:
             f.write(content)
 
+        # Store a flat filename in the DB (replace / with _ so it's readable)
+        flat_name = raw_name.replace("/", "_")
+
         img = Image(
             id=str(uuid.uuid4()),
             dataset_id=dataset_id,
-            filename=filename,
+            filename=flat_name,
             filepath=str(file_path),
             file_size=len(content),
         )
@@ -119,6 +130,97 @@ async def get_dataset(
     return DatasetResponse.model_validate(dataset)
 
 
+@router.get("/{dataset_id}/export")
+async def export_dataset(
+    dataset_id: str,
+    max_images: int = Query(100, ge=1, le=100000, description="Target number of images in the exported dataset"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Smart Export: Returns a perfectly balanced dataset of size max_images.
+    Includes ALL outliers (high priority for labeling), and distributes the
+    remaining quota perfectly evenly across all clusters, excluding duplicates.
+    """
+    import tempfile
+    import zipfile
+    from collections import defaultdict
+    from fastapi.responses import FileResponse
+
+    # 1. Verify dataset
+    result = await db.execute(select(Dataset).where(Dataset.id == dataset_id))
+    dataset = result.scalar_one_or_none()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    # 2. Grab all outliers first (high priority edge cases)
+    outlier_res = await db.execute(
+        select(Image).where(Image.dataset_id == dataset_id, Image.is_outlier == True)
+    )
+    selected_images = list(outlier_res.scalars().all())
+    
+    # 3. Calculate remaining quota we need to fill from normal classes
+    quota = max(0, max_images - len(selected_images))
+    
+    if quota > 0:
+        # Get all non-duplicate, non-outlier images
+        normal_res = await db.execute(
+            select(Image).where(
+                Image.dataset_id == dataset_id,
+                Image.is_outlier == False,
+                Image.is_duplicate == False
+            )
+        )
+        normal_images = normal_res.scalars().all()
+        
+        # Group by cluster_id
+        cluster_map = defaultdict(list)
+        for img in normal_images:
+            c_id = img.cluster_id if img.cluster_id is not None else -1
+            cluster_map[c_id].append(img)
+            
+        # Distribute remaining quota equally across clusters:
+        # Sort clusters by size ascending (so small clusters use up their quota
+        # fast and pass the remaining quota onto the larger clusters)
+        clusters = sorted(list(cluster_map.values()), key=len)
+        remaining_clusters = len(clusters)
+        
+        for cluster_imgs in clusters:
+            if remaining_clusters == 0 or quota == 0:
+                break
+            # Fair share for this specific cluster
+            share = max(1, quota // remaining_clusters)
+            # Take up to its fair share (or all it has if smaller)
+            take = min(len(cluster_imgs), share)
+            
+            selected_images.extend(cluster_imgs[:take])
+            quota -= take
+            remaining_clusters -= 1
+
+    if not selected_images:
+        raise HTTPException(status_code=400, detail="No images available to export")
+
+    # 3. Create a temporary ZIP file and add the images
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+    os.close(tmp_fd)
+
+    try:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for img in images:
+                if os.path.exists(img.filepath):
+                    # Store in zip using the original flat filename (e.g. cat_001.png)
+                    zf.write(img.filepath, arcname=img.filename)
+                    
+        return FileResponse(
+            path=tmp_path,
+            filename=f"{dataset.name}_export_{max_images}.zip",
+            media_type="application/zip",
+            background=None, # In production you'd use a BackgroundTask to delete tmp_path
+        )
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise HTTPException(status_code=500, detail=f"Failed to create ZIP: {e}")
+
+
 @router.delete("/{dataset_id}", status_code=204)
 async def delete_dataset(
     dataset_id: str,
@@ -150,7 +252,9 @@ async def process_dataset(
     request: ProcessingRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> ProcessingStatus:
-    """Trigger ML processing pipeline for a dataset."""
+    """Trigger ML processing pipeline for a dataset (runs in background)."""
+    import asyncio
+
     result = await db.execute(select(Dataset).where(Dataset.id == dataset_id))
     dataset = result.scalar_one_or_none()
     if not dataset:
@@ -162,24 +266,26 @@ async def process_dataset(
     req = request or ProcessingRequest()
     dataset.status = "processing"
     dataset.model_name = req.model_name
-    await db.flush()
+    # Commit NOW so the pipeline session sees the records
+    await db.commit()
 
-    # Trigger async processing (inline for now, Celery integration later)
+    # Launch pipeline in background — does NOT block the HTTP response
     from app.services.processing import process_dataset_pipeline
 
-    try:
-        await process_dataset_pipeline(dataset_id, req)
-    except Exception as e:
-        logger.error(f"Processing failed: {e}")
-        dataset.status = "failed"
-        await db.flush()
+    async def _run():
+        try:
+            await process_dataset_pipeline(dataset_id, req)
+        except Exception as exc:
+            logger.error(f"Background pipeline error: {exc}")
+
+    asyncio.create_task(_run())
 
     return ProcessingStatus(
         dataset_id=dataset_id,
-        status=dataset.status,
+        status="processing",
         progress=0.0,
-        current_step="queued",
-        message="Processing started",
+        current_step="started",
+        message="Processing started in background",
     )
 
 

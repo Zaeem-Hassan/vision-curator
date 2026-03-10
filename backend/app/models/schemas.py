@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 class DatasetCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
-    model_name: str = "dinov2"
+    model_name: str = "resnet"
 
 
 class DatasetResponse(BaseModel):
@@ -147,7 +147,7 @@ class EmbeddingMapResponse(BaseModel):
 
 
 class ProcessingRequest(BaseModel):
-    model_name: str = "dinov2"
+    model_name: str = "resnet"
     cluster_method: str = "kmeans"
     n_clusters: int = 10
     detect_duplicates: bool = True

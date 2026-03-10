@@ -28,7 +28,7 @@ class OutlierDetector:
         method: str = "ensemble",
         random_state: int = 42,
     ):
-        self.contamination = contamination
+        self.contamination = max(0.01, min(contamination, 0.49))
         self.n_neighbors = n_neighbors
         self.method = method
         self.random_state = random_state
@@ -43,8 +43,7 @@ class OutlierDetector:
 
         Returns:
             Tuple of (scores, mask):
-                - scores: Anomaly score per image [N].
-                  Higher = more anomalous.
+                - scores: Anomaly score per image [N]. Higher = more anomalous.
                 - mask: Boolean array [N], True = outlier.
         """
         n_samples = embeddings.shape[0]
@@ -56,8 +55,8 @@ class OutlierDetector:
             scores, mask = self._knn_distance(embeddings, neighbors)
         else:
             # Ensemble: combine both methods
-            if_scores, if_mask = self._isolation_forest(embeddings)
-            knn_scores, knn_mask = self._knn_distance(embeddings, neighbors)
+            if_scores, _ = self._isolation_forest(embeddings)
+            knn_scores, _ = self._knn_distance(embeddings, neighbors)
 
             # Normalize scores to [0, 1] and average
             if_norm = self._normalize(if_scores)
@@ -68,7 +67,7 @@ class OutlierDetector:
             threshold = np.percentile(scores, (1 - self.contamination) * 100)
             mask = scores >= threshold
 
-        n_outliers = mask.sum()
+        n_outliers = int(mask.sum())
         logger.info(f"Outlier detection: {n_outliers}/{n_samples} flagged ({n_outliers / n_samples * 100:.1f}%)")
         return scores, mask
 
@@ -83,7 +82,6 @@ class OutlierDetector:
             n_estimators=100,
         )
         predictions = iso.fit_predict(embeddings)
-        # sklearn: -1 = outlier, 1 = inlier
         mask = predictions == -1
         scores = -iso.score_samples(embeddings)  # Higher = more anomalous
         return scores, mask

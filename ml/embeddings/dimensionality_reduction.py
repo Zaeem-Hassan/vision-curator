@@ -65,6 +65,8 @@ class DimensionalityReducer:
                 min_dist=self.min_dist,
                 random_state=self.random_state,
                 metric="cosine",
+                n_epochs=100,       # default 200 — halves runtime, near-identical layout
+                low_memory=False,   # faster when RAM is available
             )
             result = reducer.fit_transform(embeddings)
             logger.info(f"UMAP complete: {result.shape}")

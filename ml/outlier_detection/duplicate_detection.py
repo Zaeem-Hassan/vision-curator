@@ -38,14 +38,12 @@ class DuplicateDetector:
         n = embeddings.shape[0]
         logger.info(f"Detecting duplicates among {n} images (threshold={self.threshold})")
 
-        # Normalize embeddings
+        # Normalize embeddings for cosine similarity
         norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
         norms = np.where(norms < 1e-8, 1.0, norms)
-        normalized = embeddings / norms
+        normalized = np.ascontiguousarray(embeddings / norms, dtype=np.float32)
 
-        # Compute pairwise cosine similarity
-        # For large datasets, process in chunks to avoid OOM
-        assigned = set()
+        assigned: set[int] = set()
         groups: dict[str, list[int]] = {}
 
         chunk_size = 1000  # Process 1000 rows at a time
@@ -59,7 +57,6 @@ class DuplicateDetector:
                 if global_i in assigned:
                     continue
 
-                # Find similar images (only look at indices > global_i to avoid double counting)
                 similarities = sim_chunk[local_i]
                 similar_indices = np.where(
                     (similarities >= self.threshold)

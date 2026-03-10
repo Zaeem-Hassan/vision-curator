@@ -25,6 +25,7 @@ class ClusterEngine:
         n_clusters: int = 10,
         min_cluster_size: int = 15,
         random_state: int = 42,
+        reduce_before_cluster: bool = False,  # kept for API compat, not used
     ):
         self.method = method
         self.n_clusters = n_clusters
@@ -53,7 +54,7 @@ class ClusterEngine:
         self._labels = labels
 
         # Compute and log metrics
-        unique_labels = set(labels) - {-1}
+        unique_labels = set(labels.tolist()) - {-1}
         logger.info(f"Clustering complete: {len(unique_labels)} clusters found")
 
         if len(unique_labels) >= 2 and n_samples > len(unique_labels):
@@ -69,7 +70,8 @@ class ClusterEngine:
 
     def _kmeans_cluster(self, embeddings: np.ndarray, n_samples: int) -> np.ndarray:
         """KMeans clustering."""
-        k = min(self.n_clusters, n_samples)
+        k = min(self.n_clusters, n_samples - 1)
+        k = max(k, 2)
         logger.info(f"Running KMeans with k={k}")
 
         self._model = KMeans(
@@ -78,8 +80,7 @@ class ClusterEngine:
             n_init=10,
             max_iter=300,
         )
-        labels = self._model.fit_predict(embeddings)
-        return labels
+        return self._model.fit_predict(embeddings).astype(np.int32)
 
     def _hdbscan_cluster(self, embeddings: np.ndarray, n_samples: int) -> np.ndarray:
         """HDBSCAN density-based clustering."""
@@ -95,23 +96,25 @@ class ClusterEngine:
                 cluster_selection_method="eom",
             )
             labels = self._model.fit_predict(embeddings)
-            return labels
+
+            # If everything is noise, fall back to KMeans
+            if len(set(labels.tolist()) - {-1}) < 2:
+                logger.warning("HDBSCAN found <2 clusters, falling back to KMeans")
+                return self._kmeans_cluster(embeddings, n_samples)
+
+            return labels.astype(np.int32)
 
         except ImportError:
             logger.warning("hdbscan not installed, falling back to KMeans")
             return self._kmeans_cluster(embeddings, n_samples)
 
     def get_cluster_stats(self, embeddings: np.ndarray) -> list[dict]:
-        """Compute per-cluster statistics.
-
-        Returns:
-            List of dicts with cluster_id, size, mean, std info.
-        """
+        """Compute per-cluster statistics."""
         if self._labels is None:
             raise RuntimeError("Must call fit_predict() first")
 
         stats = []
-        unique_labels = sorted(set(self._labels) - {-1})
+        unique_labels = sorted(set(self._labels.tolist()) - {-1})
 
         for label in unique_labels:
             mask = self._labels == label

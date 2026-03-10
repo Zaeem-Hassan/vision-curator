@@ -36,7 +36,7 @@ class FAISSIndex:
         Args:
             embeddings: Array of shape [N, D].
         """
-        embeddings = embeddings.astype(np.float32)
+        embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
         faiss.normalize_L2(embeddings)
 
         self.index = faiss.IndexFlatIP(self.dim)
@@ -58,7 +58,7 @@ class FAISSIndex:
         if self.index is None:
             raise RuntimeError("Index not built. Call build() or load() first.")
 
-        query = query.astype(np.float32)
+        query = np.ascontiguousarray(query, dtype=np.float32)
         faiss.normalize_L2(query)
         distances, indices = self.index.search(query, top_k)
         return distances, indices
@@ -73,7 +73,7 @@ class FAISSIndex:
             self.build(embeddings)
             return
 
-        embeddings = embeddings.astype(np.float32)
+        embeddings = np.ascontiguousarray(embeddings, dtype=np.float32)
         faiss.normalize_L2(embeddings)
         self.index.add(embeddings)
         self._n_vectors += embeddings.shape[0]
