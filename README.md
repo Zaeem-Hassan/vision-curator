@@ -1,81 +1,119 @@
-# 🔬 VisionCurator
-
-**Self-Supervised Dataset Intelligence Platform for Computer Vision**
-
-> Automatically analyze image datasets using SSL models, detect duplicates/outliers, cluster semantically, and explore your data in an interactive 3D embedding galaxy.
+<div align="center">
+  <h1 align="center">🔬 VisionCurator</h1>
+  <p align="center">
+    <strong>Self-Supervised Dataset Intelligence Platform for Computer Vision</strong>
+    <br />
+    A powerful tool to automatically analyze, clean, and explore image datasets using state-of-the-art AI.
+  </p>
+</div>
 
 ---
 
-## 🏗️ Architecture
+## 🚀 Overview
 
+**VisionCurator** is an end-to-end platform for computer vision engineers and data scientists to manage and curate raw image datasets before labeling. 
+
+Instead of manually sifting through thousands of images, VisionCurator uses self-supervised learning models (like **ResNet50**, **DINOv2**, **SimCLR**) to understand the semantic meaning of your images. It automatically detects duplicates, flags anomalous outliers, groups similar images into clusters, and lets you explore your entire dataset in an interactive 3D galaxy.
+
+When you're done, use **Smart Export** to download a perfectly balanced, duplicate-free dataset ready for your labeling pipeline.
+
+<br>
+
+## ✨ Key Features
+
+- **🧠 Auto-Embedding Extraction**: Uses PyTorch and torchvision/SSL models to extract rich feature vectors from your images automatically.
+- **📁 Bulk Folder Uploads**: Upload entire directory trees of images right from your browser; the system handles subfolders seamlessly.
+- **👯‍♂️ Duplicate Detection**: Identifies exact and near-duplicate images using highly optimized cosine-similarity matching.
+- **🚨 Outlier Detection**: Flags rare edge-cases, anomalies, and corrupted images using Isolation Forests and k-NN distance scoring.
+- **📦 Semantic Clustering**: Groups visually similar images together using KMeans to help you understand your data distribution.
+- **🌌 3D Galaxy View**: Explore your dataset interactively in a 3D UMAP point cloud rendered with React Three Fiber.
+- **🔍 Vector Search**: Built-in visual search powered by FAISS. Upload an image to instantly find the most visually similar images in your dataset.
+- **🎯 Smart Export**: Stop labeling redundant data. Export a perfectly balanced ZIP file that prioritizes high-value outliers, ensures equal representation across clusters, and excludes duplicates.
+- **⚡ High Performance**: Parallelized image processing, optimized batch inference with `torch.inference_mode()`, and SQLite/SQLAlchemy backend.
+
+<br>
+
+## 🛠️ Tech Stack
+
+### Backend
+- **Framework**: FastAPI (Python 3.11+)
+- **Machine Learning**: PyTorch, Torchvision, scikit-learn, UMAP-learn, FAISS
+- **Database**: SQLite / SQLAlchemy ORM (Async)
+- **Concurrency**: `asyncio` threads + `ThreadPoolExecutor` for parallel I/O
+
+### Frontend
+- **Framework**: Next.js 14 (App Router) + React
+- **Styling**: TailwindCSS + Lucide Icons + Glassmorphism UI
+- **State Management**: Zustand + React Query (@tanstack/react-query)
+- **3D Rendering**: Three.js + React Three Fiber (@react-three/fiber)
+
+<br>
+
+## 🚀 Quick Start (Local Development)
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/yourusername/vision-curator.git
+cd vision-curator
 ```
+
+### 2. Backend Setup
+We recommend using [uv](https://github.com/astral-sh/uv) for fast Python dependency management.
+
+```bash
+cd backend
+
+# Create and activate a virtual environment
+uv venv
+# Windows: .venv\Scripts\activate
+# Mac/Linux: source .venv/bin/activate
+
+# Install dependencies
+uv pip install -e .
+
+# Start the FastAPI server (runs on http://localhost:8000)
+python -m app.main
+```
+
+### 3. Frontend Setup
+Open a new terminal window.
+
+```bash
+cd frontend
+
+# Install Node modules
+npm install
+
+# Start the Next.js development server (runs on http://localhost:3000)
+npm run dev
+```
+
+### 4. Open the App
+Navigate to **http://localhost:3000** in your browser.
+
+<br>
+
+## 🏗️ Architecture overview
+
+```text
 ┌──────────────────────────────────────────────────────────────────┐
 │                    Frontend (Next.js / React)                    │
-│  Dashboard │ Galaxy 3D │ Search │ Duplicates │ Outliers │ Clusters │
+│  Dashboard │ Galaxy 3D │ Search │ Duplicates │ Outliers │ Curves │
 ├──────────────────────────────────────────────────────────────────┤
 │                       FastAPI Backend                            │
-│           REST API │ File Upload │ Static Serving                │
+│           REST API │ File Upload │ ZIP Export                    │
 ├──────────────────────────────────────────────────────────────────┤
 │                      ML Pipeline Services                        │
-│  DINOv2 │ SimCLR │ MoCo │ FAISS │ UMAP │ KMeans │ HDBSCAN      │
+│  ResNet50 │ DINOv2 │ FAISS │ UMAP │ KMeans │ Isolation Forest    │
 ├──────────────────────────────────────────────────────────────────┤
-│  Celery Workers  │  Redis (Queue)  │  PostgreSQL  │  MinIO/S3   │
+│       ThreadPoolExecutor (Parallel I/O)  │  SQLite Database      │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## ✨ Features
+The pipeline runs entirely locally by default. Images are saved to `backend/data/uploads`, and the database is stored in `backend/data/visioncurator.db`.
 
-| Feature | Description |
-|---------|-------------|
-| **Embedding Generation** | DINOv2, SimCLR, MoCo self-supervised models |
-| **Vector Search** | FAISS-powered similarity search (<50ms latency) |
-| **Duplicate Detection** | Cosine similarity grouping (threshold 0.98) |
-| **Outlier Detection** | Isolation Forest + k-NN ensemble |
-| **Clustering** | KMeans / HDBSCAN semantic grouping |
-| **3D Galaxy** | React Three Fiber interactive point cloud |
-| **Dataset Versioning** | Track dataset evolution over time |
-| **Background Processing** | Celery async pipeline for large datasets |
+<br>
 
-## 🗂️ Project Structure
+## 📝 License
 
-```
-visioncurator/
-├── backend/
-│   ├── app/
-│   │   ├── api/              # FastAPI route handlers
-│   │   │   ├── datasets.py   # Dataset CRUD + processing
-│   │   │   ├── search.py     # Similarity search
-│   │   │   └── embeddings.py # Embedding map endpoints
-│   │   ├── models/           # SQLAlchemy models + Pydantic schemas
-│   │   ├── services/         # Processing pipeline, Celery tasks
-│   │   ├── config.py         # Pydantic settings
-│   │   ├── database.py       # Async SQLAlchemy setup
-│   │   └── main.py           # FastAPI entry point
-│   └── pyproject.toml
-├── ml/
-│   ├── embedding_models/     # DINOv2, SimCLR, MoCo wrappers
-│   ├── embeddings/           # FAISS index, UMAP/t-SNE
-│   ├── clustering/           # KMeans, HDBSCAN
-│   ├── outlier_detection/    # Isolation Forest, k-NN, duplicates
-│   └── preprocessing/       # Image loading & transforms
-├── frontend/
-│   └── src/
-│       ├── app/              # Next.js pages (App Router)
-│       ├── components/       # Sidebar, ImageModal, ClientLayout
-│       └── lib/              # API client, Zustand store, providers
-├── infrastructure/
-│   ├── docker/               # Dockerfiles
-│   └── kubernetes/           # K8s deployment manifests
-├── docker-compose.yml
-└── README.md
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- Node.js 20+
-- [uv](https://github.com/astral-sh/uv) (Python package manager)
-
-### 1. Backend Setup
+This project is licensed under the MIT License - see the LICENSE file for details.
